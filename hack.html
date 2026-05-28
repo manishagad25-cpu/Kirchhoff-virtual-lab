@@ -1,0 +1,774 @@
+bash
+
+cat > /mnt/user-data/outputs/kirchhoff_lab.html << 'HTMLEOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kirchhoff's Law Virtual Lab</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --panel: #0f1628;
+    --border: #1e3a5f;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --accent3: #39ff14;
+    --text: #c8d8f0;
+    --muted: #4a6080;
+    --wire: #2a5a8a;
+    --wire-hot: #00d4ff;
+    --red-wire: #ff4444;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Exo 2', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content:'';
+    position:fixed; top:0; left:0; width:100%; height:100%;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,212,255,0.015) 2px, rgba(0,212,255,0.015) 4px);
+    pointer-events:none; z-index:1000;
+  }
+
+  header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(15,22,40,0.95);
+    backdrop-filter: blur(10px);
+    position:sticky; top:0; z-index:100;
+  }
+  .logo { font-family:'Share Tech Mono'; font-size:1.1rem; color:var(--accent); letter-spacing:2px; }
+  .logo span { color:var(--text); opacity:0.5; }
+  .status-bar { display:flex; gap:20px; align-items:center; }
+  .status-dot { width:8px; height:8px; border-radius:50%; background:var(--accent3); box-shadow:0 0 8px var(--accent3); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .status-text { font-family:'Share Tech Mono'; font-size:0.75rem; color:var(--accent3); }
+
+  .main {
+    display:grid;
+    grid-template-columns: 1fr 340px;
+    gap:0;
+    height:calc(100vh - 53px);
+  }
+
+  /* LEFT: Circuit canvas */
+  .lab-area {
+    padding:24px;
+    display:flex;
+    flex-direction:column;
+    gap:20px;
+    overflow-y:auto;
+  }
+
+  .section-label {
+    font-family:'Share Tech Mono';
+    font-size:0.65rem;
+    color:var(--muted);
+    letter-spacing:3px;
+    text-transform:uppercase;
+    margin-bottom:8px;
+  }
+
+  .circuit-container {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius:4px;
+    padding:20px;
+    position:relative;
+    overflow:hidden;
+  }
+  .circuit-container::before {
+    content:'';
+    position:absolute; inset:0;
+    background: radial-gradient(ellipse at 50% 50%, rgba(0,212,255,0.04) 0%, transparent 70%);
+    pointer-events:none;
+  }
+
+  #circuitSVG {
+    width:100%;
+    display:block;
+  }
+
+  /* Controls row */
+  .controls-row {
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:16px;
+  }
+
+  .ctrl-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius:4px;
+    padding:16px;
+    position:relative;
+  }
+  .ctrl-card:hover { border-color: rgba(0,212,255,0.3); }
+  .ctrl-title {
+    font-family:'Share Tech Mono';
+    font-size:0.65rem;
+    color:var(--muted);
+    letter-spacing:2px;
+    margin-bottom:12px;
+  }
+  .ctrl-value {
+    font-family:'Share Tech Mono';
+    font-size:1.6rem;
+    color:var(--accent);
+    margin-bottom:10px;
+  }
+  .ctrl-value span { font-size:0.85rem; color:var(--muted); margin-left:4px; }
+
+  input[type=range] {
+    -webkit-appearance:none;
+    width:100%; height:4px;
+    background: var(--border);
+    border-radius:2px; outline:none; cursor:pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none;
+    width:14px; height:14px;
+    border-radius:50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    cursor:pointer;
+  }
+
+  /* RIGHT: Data panel */
+  .data-panel {
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    display:flex;
+    flex-direction:column;
+    overflow-y:auto;
+  }
+
+  .panel-section {
+    padding:20px;
+    border-bottom:1px solid var(--border);
+  }
+
+  .meter-grid {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+  }
+
+  .meter {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius:4px;
+    padding:12px;
+    text-align:center;
+    position:relative;
+    overflow:hidden;
+  }
+  .meter::before {
+    content:'';
+    position:absolute; bottom:0; left:0; right:0; height:2px;
+    background: var(--accent);
+    opacity:0.5;
+  }
+  .meter.voltage::before { background:var(--accent2); }
+  .meter.verified::before { background:var(--accent3); }
+
+  .meter-label {
+    font-family:'Share Tech Mono';
+    font-size:0.6rem;
+    color:var(--muted);
+    letter-spacing:1.5px;
+    margin-bottom:6px;
+  }
+  .meter-val {
+    font-family:'Share Tech Mono';
+    font-size:1.1rem;
+    color:var(--accent);
+    transition: color 0.3s;
+  }
+  .meter.voltage .meter-val { color:var(--accent2); }
+  .meter.verified .meter-val { color:var(--accent3); font-size:0.85rem; }
+
+  /* KCL / KVL verification */
+  .verify-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius:4px;
+    padding:14px;
+    margin-bottom:10px;
+    transition: border-color 0.5s, box-shadow 0.5s;
+  }
+  .verify-box.pass {
+    border-color: var(--accent3);
+    box-shadow: 0 0 16px rgba(57,255,20,0.15);
+  }
+  .verify-header {
+    display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:8px;
+  }
+  .verify-name {
+    font-family:'Share Tech Mono';
+    font-size:0.7rem; color:var(--accent); letter-spacing:2px;
+  }
+  .verify-badge {
+    font-family:'Share Tech Mono';
+    font-size:0.6rem;
+    padding:3px 8px;
+    border-radius:2px;
+    background: var(--border);
+    color:var(--muted);
+    transition: all 0.5s;
+  }
+  .verify-badge.pass {
+    background: rgba(57,255,20,0.15);
+    color:var(--accent3);
+    box-shadow: 0 0 8px rgba(57,255,20,0.3);
+  }
+  .verify-eq {
+    font-family:'Share Tech Mono';
+    font-size:0.75rem;
+    color:var(--text);
+    opacity:0.7;
+  }
+  .verify-result {
+    font-family:'Share Tech Mono';
+    font-size:0.8rem;
+    color:var(--accent3);
+    margin-top:4px;
+  }
+
+  /* Data log table */
+  .data-table {
+    width:100%;
+    border-collapse:collapse;
+    font-family:'Share Tech Mono';
+    font-size:0.7rem;
+  }
+  .data-table th {
+    color:var(--muted);
+    text-align:left;
+    padding:4px 6px;
+    border-bottom:1px solid var(--border);
+    letter-spacing:1px;
+  }
+  .data-table td {
+    padding:5px 6px;
+    color:var(--text);
+    border-bottom:1px solid rgba(30,58,95,0.4);
+  }
+  .data-table td.val { color:var(--accent); }
+  .data-table tr:hover td { background:rgba(0,212,255,0.04); }
+
+  .laws-verified-banner {
+    display:none;
+    margin:0 20px 20px;
+    background: rgba(57,255,20,0.08);
+    border:1px solid var(--accent3);
+    border-radius:4px;
+    padding:14px;
+    text-align:center;
+    animation: glow-in 0.5s ease;
+  }
+  .laws-verified-banner.show { display:block; }
+  @keyframes glow-in {
+    from { opacity:0; transform:scale(0.97); }
+    to { opacity:1; transform:scale(1); }
+  }
+  .banner-title {
+    font-family:'Share Tech Mono';
+    font-size:0.8rem;
+    color:var(--accent3);
+    letter-spacing:3px;
+    margin-bottom:4px;
+  }
+  .banner-sub {
+    font-size:0.7rem;
+    color:var(--muted);
+  }
+
+  /* fault flash */
+  @keyframes fault-flash {
+    0%,100%{background:var(--panel)}
+    25%,75%{background:rgba(255,50,50,0.12)}
+  }
+  .fault { animation: fault-flash 0.6s; }
+
+  .particle {
+    position:absolute;
+    width:5px; height:5px;
+    border-radius:50%;
+    background:var(--accent);
+    box-shadow:0 0 6px var(--accent);
+    pointer-events:none;
+    opacity:0.85;
+  }
+
+  /* responsive */
+  @media(max-width:900px){
+    .main { grid-template-columns:1fr; }
+    .data-panel { border-left:none; border-top:1px solid var(--border); }
+    .controls-row { grid-template-columns:1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">KIRCHHOFF<span>/</span>LAB <span style="font-size:0.7rem;margin-left:8px">v1.0</span></div>
+  <div class="status-bar">
+    <div class="status-dot"></div>
+    <div class="status-text">SIMULATION ACTIVE</div>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- LEFT: Lab workbench -->
+  <div class="lab-area">
+    <div>
+      <div class="section-label">Circuit Workbench — Parallel Network (KCL + KVL Verification)</div>
+      <div class="circuit-container" id="circuitContainer">
+        <svg id="circuitSVG" viewBox="0 0 700 340" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="arrowB" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="#00d4ff" stroke-width="1.5"/>
+            </marker>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+              <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+            <filter id="glow-green">
+              <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
+              <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+            </filter>
+          </defs>
+
+          <!-- Background grid -->
+          <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(30,58,95,0.4)" stroke-width="0.5"/>
+          </pattern>
+          <rect width="700" height="340" fill="url(#grid)" rx="2"/>
+
+          <!-- === MAIN BUS WIRES === -->
+          <!-- Top bus: from battery+ across top -->
+          <line id="topBus" x1="90" y1="60" x2="620" y2="60" stroke="#00d4ff" stroke-width="2.5" filter="url(#glow)"/>
+          <!-- Bottom bus: from battery- across bottom -->
+          <line id="botBus" x1="90" y1="280" x2="620" y2="280" stroke="#2a5a8a" stroke-width="2.5"/>
+
+          <!-- === DC SOURCE (Battery) === -->
+          <g id="battery">
+            <!-- Battery body -->
+            <rect x="30" y="120" width="60" height="100" rx="4" fill="#0f1628" stroke="#1e3a5f" stroke-width="1.5"/>
+            <text x="60" y="112" text-anchor="middle" fill="#4a6080" font-family="Share Tech Mono" font-size="9" letter-spacing="1">DC SRC</text>
+            <!-- + terminal line -->
+            <line x1="60" y1="60" x2="60" y2="120" stroke="#ff6b35" stroke-width="2.5"/>
+            <text x="72" y="82" fill="#ff6b35" font-family="Share Tech Mono" font-size="11" font-weight="bold">+</text>
+            <!-- - terminal line -->
+            <line x1="60" y1="220" x2="60" y2="280" stroke="#4a6080" stroke-width="2.5"/>
+            <text x="72" y="252" fill="#4a6080" font-family="Share Tech Mono" font-size="11">−</text>
+            <!-- Voltage symbol -->
+            <text id="batLabel" x="60" y="168" text-anchor="middle" fill="#00d4ff" font-family="Share Tech Mono" font-size="14" font-weight="bold" filter="url(#glow)">12V</text>
+            <text x="60" y="185" text-anchor="middle" fill="#4a6080" font-family="Share Tech Mono" font-size="9">DC</text>
+            <!-- Battery lines (symbol) -->
+            <line x1="42" y1="135" x2="78" y2="135" stroke="#ff6b35" stroke-width="3"/>
+            <line x1="48" y1="147" x2="72" y2="147" stroke="#4a6080" stroke-width="1.5"/>
+            <line x1="42" y1="159" x2="78" y2="159" stroke="#ff6b35" stroke-width="3"/>
+            <line x1="48" y1="171" x2="72" y2="171" stroke="#4a6080" stroke-width="1.5"/>
+            <line x1="42" y1="183" x2="78" y2="183" stroke="#ff6b35" stroke-width="3"/>
+            <line x1="48" y1="195" x2="72" y2="195" stroke="#4a6080" stroke-width="1.5"/>
+            <line x1="42" y1="207" x2="78" y2="207" stroke="#ff6b35" stroke-width="3"/>
+          </g>
+
+          <!-- Main current arrow on top bus -->
+          <line x1="100" y1="60" x2="155" y2="60" stroke="#ff6b35" stroke-width="2" marker-end="url(#arrowB)" opacity="0.8"/>
+          <text x="127" y="50" text-anchor="middle" fill="#ff6b35" font-family="Share Tech Mono" font-size="9" id="itotalLabel">IT</text>
+
+          <!-- === BRANCH 1 — R1 === -->
+          <line x1="200" y1="60" x2="200" y2="100" stroke="#00d4ff" stroke-width="2" filter="url(#glow)"/>
+          <line x1="200" y1="220" x2="200" y2="280" stroke="#2a5a8a" stroke-width="2"/>
+          <!-- Resistor R1 (zigzag) -->
+          <polyline id="r1shape" points="200,100 190,110 210,122 190,134 210,146 190,158 210,170 200,180 200,220" fill="none" stroke="#00d4ff" stroke-width="2.5" stroke-linejoin="round" filter="url(#glow)"/>
+          <text x="224" y="160" fill="#00d4ff" font-family="Share Tech Mono" font-size="11" filter="url(#glow)">R1</text>
+          <text id="r1label" x="224" y="175" fill="#4a6080" font-family="Share Tech Mono" font-size="10">100Ω</text>
+          <!-- Ammeter A1 -->
+          <circle cx="200" cy="88" r="10" fill="#0a0e1a" stroke="#ff6b35" stroke-width="1.5"/>
+          <text x="200" y="92" text-anchor="middle" fill="#ff6b35" font-family="Share Tech Mono" font-size="8" font-weight="bold">A</text>
+          <text id="a1label" x="200" y="72" text-anchor="middle" fill="#ff6b35" font-family="Share Tech Mono" font-size="9">—mA</text>
+
+          <!-- === BRANCH 2 — R2 === -->
+          <line x1="370" y1="60" x2="370" y2="100" stroke="#00d4ff" stroke-width="2" filter="url(#glow)"/>
+          <line x1="370" y1="220" x2="370" y2="280" stroke="#2a5a8a" stroke-width="2"/>
+          <!-- Resistor R2 -->
+          <polyline id="r2shape" points="370,100 360,110 380,122 360,134 380,146 360,158 380,170 370,180 370,220" fill="none" stroke="#00d4ff" stroke-width="2.5" stroke-linejoin="round" filter="url(#glow)"/>
+          <text x="394" y="160" fill="#00d4ff" font-family="Share Tech Mono" font-size="11" filter="url(#glow)">R2</text>
+          <text id="r2label" x="394" y="175" fill="#4a6080" font-family="Share Tech Mono" font-size="10">220Ω</text>
+          <!-- Ammeter A2 -->
+          <circle cx="370" cy="88" r="10" fill="#0a0e1a" stroke="#ff6b35" stroke-width="1.5"/>
+          <text x="370" y="92" text-anchor="middle" fill="#ff6b35" font-family="Share Tech Mono" font-size="8" font-weight="bold">A</text>
+          <text id="a2label" x="370" y="72" text-anchor="middle" fill="#ff6b35" font-family="Share Tech Mono" font-size="9">—mA</text>
+
+          <!-- === BRANCH 3 — R3 (Rheostat) === -->
+          <line x1="540" y1="60" x2="540" y2="100" stroke="#00d4ff" stroke-width="2" filter="url(#glow)"/>
+          <line x1="540" y1="220" x2="540" y2="280" stroke="#2a5a8a" stroke-width="2"/>
+          <!-- Resistor R3 (rheostat — arrow through) -->
+          <polyline id="r3shape" points="540,100 530,110 550,122 530,134 550,146 530,158 550,170 540,180 540,220" fill="none" stroke="#39ff14" stroke-width="2.5" stroke-linejoin="round" filter="url(#glow-green)"/>
+          <!-- Rheostat arrow -->
+          <line x1="520" y1="196" x2="558" y2="136" stroke="#39ff14" stroke-width="1.5" stroke-dasharray="3,2" opacity="0.7"/>
+          <polygon points="558,130 564,142 552,142" fill="#39ff14" opacity="0.8"/>
+          <text x="564" y="160" fill="#39ff14" font-family="Share Tech Mono" font-size="11" filter="url(#glow-green)">R3</text>
+          <text id="r3label" x="564" y="175" fill="#39ff14" font-family="Share Tech Mono" font-size="10">470Ω</text>
+          <text x="564" y="188" fill="#4a6080" font-family="Share Tech Mono" font-size="8">RHEOSTAT</text>
+          <!-- Ammeter A3 -->
+          <circle cx="540" cy="88" r="10" fill="#0a0e1a" stroke="#ff6b35" stroke-width="1.5"/>
+          <text x="540" y="92" text-anchor="middle" fill="#ff6b35" font-family="Share Tech Mono" font-size="8" font-weight="bold">A</text>
+          <text id="a3label" x="540" y="72" text-anchor="middle" fill="#ff6b35" font-family="Share Tech Mono" font-size="9">—mA</text>
+
+          <!-- Node dots -->
+          <circle cx="200" cy="60" r="5" fill="#00d4ff" filter="url(#glow)"/>
+          <circle cx="370" cy="60" r="5" fill="#00d4ff" filter="url(#glow)"/>
+          <circle cx="540" cy="60" r="5" fill="#00d4ff" filter="url(#glow)"/>
+          <circle cx="200" cy="280" r="5" fill="#2a5a8a"/>
+          <circle cx="370" cy="280" r="5" fill="#2a5a8a"/>
+          <circle cx="540" cy="280" r="5" fill="#2a5a8a"/>
+
+          <!-- Node labels -->
+          <text x="310" y="50" text-anchor="middle" fill="#00d4ff" font-family="Share Tech Mono" font-size="10" opacity="0.6">NODE A (+)</text>
+          <text x="310" y="300" text-anchor="middle" fill="#4a6080" font-family="Share Tech Mono" font-size="10" opacity="0.6">NODE B (−)</text>
+
+          <!-- Voltmeter probe indicators -->
+          <g id="vmeter" opacity="0.85">
+            <circle cx="620" cy="60" r="8" fill="#0a0e1a" stroke="#ff6b35" stroke-width="1.5"/>
+            <text x="620" y="64" text-anchor="middle" fill="#ff6b35" font-family="Share Tech Mono" font-size="7" font-weight="bold">V</text>
+            <circle cx="620" cy="280" r="8" fill="#0a0e1a" stroke="#4a6080" stroke-width="1.5"/>
+            <text x="620" y="284" text-anchor="middle" fill="#4a6080" font-family="Share Tech Mono" font-size="7" font-weight="bold">V</text>
+            <line x1="620" y1="68" x2="620" y2="272" stroke="#ff6b35" stroke-width="1" stroke-dasharray="4,3" opacity="0.4"/>
+            <text id="vmLabel" x="648" y="175" fill="#ff6b35" font-family="Share Tech Mono" font-size="11" filter="url(#glow)">12.00V</text>
+            <text x="648" y="189" fill="#4a6080" font-family="Share Tech Mono" font-size="8">VMETER</text>
+          </g>
+
+          <!-- Particle path hints (invisible lines for JS) -->
+          <line id="pathTop1" x1="90" y1="60" x2="200" y2="60" stroke="none"/>
+          <line id="pathTop2" x1="200" y1="60" x2="370" y2="60" stroke="none"/>
+          <line id="pathTop3" x1="370" y1="60" x2="540" y2="60" stroke="none"/>
+        </svg>
+
+        <!-- Animated particles container -->
+        <div id="particles" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:hidden;"></div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div>
+      <div class="section-label">Control Panel</div>
+      <div class="controls-row">
+        <div class="ctrl-card">
+          <div class="ctrl-title">DC SOURCE VOLTAGE</div>
+          <div class="ctrl-value" id="voltageDisplay">12.0 <span>V</span></div>
+          <input type="range" id="voltageSlider" min="1" max="30" value="12" step="0.5" oninput="updateCircuit()">
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-family:'Share Tech Mono';font-size:0.6rem;color:var(--muted)"><span>1V</span><span>30V</span></div>
+        </div>
+        <div class="ctrl-card">
+          <div class="ctrl-title">R1 — RESISTOR</div>
+          <div class="ctrl-value" id="r1Display">100 <span>Ω</span></div>
+          <input type="range" id="r1Slider" min="50" max="1000" value="100" step="10" oninput="updateCircuit()">
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-family:'Share Tech Mono';font-size:0.6rem;color:var(--muted)"><span>50Ω</span><span>1kΩ</span></div>
+        </div>
+        <div class="ctrl-card">
+          <div class="ctrl-title">R2 — RESISTOR</div>
+          <div class="ctrl-value" id="r2Display">220 <span>Ω</span></div>
+          <input type="range" id="r2Slider" min="50" max="1000" value="220" step="10" oninput="updateCircuit()">
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-family:'Share Tech Mono';font-size:0.6rem;color:var(--muted)"><span>50Ω</span><span>1kΩ</span></div>
+        </div>
+      </div>
+      <div style="margin-top:16px">
+      <div class="controls-row" style="grid-template-columns:1fr 1fr">
+        <div class="ctrl-card" style="border-color:rgba(57,255,20,0.3)">
+          <div class="ctrl-title" style="color:#39ff14">R3 — RHEOSTAT (VARIABLE)</div>
+          <div class="ctrl-value" id="r3Display" style="color:#39ff14">470 <span>Ω</span></div>
+          <input type="range" id="r3Slider" min="50" max="1000" value="470" step="10" oninput="updateCircuit()" style="accent-color:#39ff14">
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-family:'Share Tech Mono';font-size:0.6rem;color:var(--muted)"><span>50Ω</span><span>1kΩ</span></div>
+        </div>
+        <div class="ctrl-card">
+          <div class="ctrl-title">FAULT SIMULATION</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+            <button onclick="triggerFault('short')" style="background:rgba(255,50,50,0.1);border:1px solid rgba(255,50,50,0.4);color:#ff4444;font-family:'Share Tech Mono';font-size:0.7rem;padding:8px;border-radius:3px;cursor:pointer;letter-spacing:1px">⚡ SHORT CIRCUIT</button>
+            <button onclick="triggerFault('ammeter')" style="background:rgba(255,107,53,0.1);border:1px solid rgba(255,107,53,0.4);color:#ff6b35;font-family:'Share Tech Mono';font-size:0.7rem;padding:8px;border-radius:3px;cursor:pointer;letter-spacing:1px">⚠ AMMETER FAULT</button>
+          </div>
+        </div>
+      </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Data panel -->
+  <div class="data-panel">
+
+    <div class="panel-section">
+      <div class="section-label">Live Ammeter Readings</div>
+      <div class="meter-grid">
+        <div class="meter">
+          <div class="meter-label">BRANCH I1 (R1)</div>
+          <div class="meter-val" id="i1Val">0.00 mA</div>
+        </div>
+        <div class="meter">
+          <div class="meter-label">BRANCH I2 (R2)</div>
+          <div class="meter-val" id="i2Val">0.00 mA</div>
+        </div>
+        <div class="meter">
+          <div class="meter-label">BRANCH I3 (R3)</div>
+          <div class="meter-val" id="i3Val">0.00 mA</div>
+        </div>
+        <div class="meter voltage">
+          <div class="meter-label">TOTAL CURRENT</div>
+          <div class="meter-val" id="itVal">0.00 mA</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-label">Voltmeter Readings</div>
+      <div class="meter-grid">
+        <div class="meter voltage">
+          <div class="meter-label">V SOURCE</div>
+          <div class="meter-val" id="vsVal">0.00 V</div>
+        </div>
+        <div class="meter voltage">
+          <div class="meter-label">V across R1</div>
+          <div class="meter-val" id="vr1Val">0.00 V</div>
+        </div>
+        <div class="meter voltage">
+          <div class="meter-label">V across R2</div>
+          <div class="meter-val" id="vr2Val">0.00 V</div>
+        </div>
+        <div class="meter voltage">
+          <div class="meter-label">V across R3</div>
+          <div class="meter-val" id="vr3Val">0.00 V</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-label">Law Verification Engine</div>
+
+      <div class="verify-box" id="kclBox">
+        <div class="verify-header">
+          <span class="verify-name">KCL — KIRCHHOFF'S CURRENT LAW</span>
+          <span class="verify-badge" id="kclBadge">CHECKING...</span>
+        </div>
+        <div class="verify-eq">ΣI = I_total − (I1 + I2 + I3) = 0</div>
+        <div class="verify-result" id="kclResult">—</div>
+      </div>
+
+      <div class="verify-box" id="kvlBox">
+        <div class="verify-header">
+          <span class="verify-name">KVL — KIRCHHOFF'S VOLTAGE LAW</span>
+          <span class="verify-badge" id="kvlBadge">CHECKING...</span>
+        </div>
+        <div class="verify-eq">V_source − V_R1 = 0 (parallel: all same)</div>
+        <div class="verify-result" id="kvlResult">—</div>
+      </div>
+    </div>
+
+    <div id="lawsBanner" class="laws-verified-banner">
+      <div class="banner-title">✓ LAWS VERIFIED</div>
+      <div class="banner-sub">Both KCL and KVL satisfied. Circuit stable.</div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-label">Real-time Data Log</div>
+      <table class="data-table">
+        <thead>
+          <tr><th>V(V)</th><th>I1(mA)</th><th>I2(mA)</th><th>I3(mA)</th><th>IT(mA)</th></tr>
+        </thead>
+        <tbody id="dataLog"></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let logData = [];
+let faultMode = false;
+let particleInterval = null;
+
+function fmt(n, d=2) { return parseFloat(n).toFixed(d); }
+
+function updateCircuit() {
+  if (faultMode) return;
+  const V  = parseFloat(document.getElementById('voltageSlider').value);
+  const R1 = parseFloat(document.getElementById('r1Slider').value);
+  const R2 = parseFloat(document.getElementById('r2Slider').value);
+  const R3 = parseFloat(document.getElementById('r3Slider').value);
+
+  // Ohm's law — parallel: all branches see full V
+  const I1 = (V / R1) * 1000; // mA
+  const I2 = (V / R2) * 1000;
+  const I3 = (V / R3) * 1000;
+  const IT = I1 + I2 + I3;
+
+  // In parallel: voltage across each resistor = V
+  const VR1 = V, VR2 = V, VR3 = V;
+
+  // Update displays
+  document.getElementById('voltageDisplay').innerHTML = fmt(V,1) + ' <span>V</span>';
+  document.getElementById('r1Display').innerHTML = fmt(R1,0) + ' <span>Ω</span>';
+  document.getElementById('r2Display').innerHTML = fmt(R2,0) + ' <span>Ω</span>';
+  document.getElementById('r3Display').innerHTML = fmt(R3,0) + ' <span>Ω</span>';
+
+  document.getElementById('r1label').textContent = fmt(R1,0)+'Ω';
+  document.getElementById('r2label').textContent = fmt(R2,0)+'Ω';
+  document.getElementById('r3label').textContent = fmt(R3,0)+'Ω';
+  document.getElementById('batLabel').textContent = fmt(V,0)+'V';
+  document.getElementById('vmLabel').textContent = fmt(V,2)+'V';
+  document.getElementById('itotalLabel').textContent = fmt(IT,1)+'mA';
+
+  document.getElementById('a1label').textContent = fmt(I1,1)+'mA';
+  document.getElementById('a2label').textContent = fmt(I2,1)+'mA';
+  document.getElementById('a3label').textContent = fmt(I3,1)+'mA';
+
+  document.getElementById('i1Val').textContent = fmt(I1,2)+' mA';
+  document.getElementById('i2Val').textContent = fmt(I2,2)+' mA';
+  document.getElementById('i3Val').textContent = fmt(I3,2)+' mA';
+  document.getElementById('itVal').textContent = fmt(IT,2)+' mA';
+  document.getElementById('vsVal').textContent = fmt(V,2)+' V';
+  document.getElementById('vr1Val').textContent = fmt(VR1,2)+' V';
+  document.getElementById('vr2Val').textContent = fmt(VR2,2)+' V';
+  document.getElementById('vr3Val').textContent = fmt(VR3,2)+' V';
+
+  // KCL verification: IT - (I1+I2+I3) should be ~0
+  const kclDiff = Math.abs(IT - (I1+I2+I3));
+  const kclPass = kclDiff < 0.01;
+  document.getElementById('kclResult').textContent =
+    `IT=${fmt(IT,2)}mA | I1+I2+I3=${fmt(I1+I2+I3,2)}mA | Δ=${fmt(kclDiff,4)}mA`;
+  document.getElementById('kclBadge').textContent = kclPass ? '✓ VERIFIED' : 'FAIL';
+  document.getElementById('kclBadge').className = 'verify-badge' + (kclPass ? ' pass' : '');
+  document.getElementById('kclBox').className = 'verify-box' + (kclPass ? ' pass' : '');
+
+  // KVL verification: parallel circuit — Vsource = VR1 = VR2 = VR3
+  const kvlDiff = Math.abs(V - VR1); // always 0 in ideal parallel
+  const kvlPass = kvlDiff < 0.01;
+  document.getElementById('kvlResult').textContent =
+    `V_src=${fmt(V,2)}V | V_R1=V_R2=V_R3=${fmt(VR1,2)}V | Δ=${fmt(kvlDiff,4)}V`;
+  document.getElementById('kvlBadge').textContent = kvlPass ? '✓ VERIFIED' : 'FAIL';
+  document.getElementById('kvlBadge').className = 'verify-badge' + (kvlPass ? ' pass' : '');
+  document.getElementById('kvlBox').className = 'verify-box' + (kvlPass ? ' pass' : '');
+
+  // Laws banner
+  const allPass = kclPass && kvlPass;
+  document.getElementById('lawsBanner').className = 'laws-verified-banner' + (allPass ? ' show' : '');
+
+  // Data log (keep last 6 rows)
+  logData.unshift({ V: fmt(V,1), I1: fmt(I1,2), I2: fmt(I2,2), I3: fmt(I3,2), IT: fmt(IT,2) });
+  if (logData.length > 6) logData.pop();
+  const tbody = document.getElementById('dataLog');
+  tbody.innerHTML = logData.map(r =>
+    `<tr><td class="val">${r.V}</td><td class="val">${r.I1}</td><td class="val">${r.I2}</td><td class="val">${r.I3}</td><td class="val">${r.IT}</td></tr>`
+  ).join('');
+
+  // Update particles
+  spawnParticles(IT);
+}
+
+// Particle animation for signal flow
+function spawnParticles(IT) {
+  const container = document.getElementById('particles');
+  const svg = document.getElementById('circuitSVG');
+  const rect = svg.getBoundingClientRect();
+  const svgW = rect.width, svgH = rect.height;
+  const vbW = 700, vbH = 340;
+  const sx = svgW / vbW, sy = svgH / vbH;
+
+  if (particleInterval) clearInterval(particleInterval);
+  container.innerHTML = '';
+
+  const speed = Math.min(Math.max(IT / 200, 0.3), 3.5); // normalize
+  const count = Math.round(Math.min(IT / 30, 12));
+
+  // Top bus: x from 90 to 620, y=60
+  let launched = 0;
+  particleInterval = setInterval(() => {
+    if (launched >= count) { clearInterval(particleInterval); return; }
+    launched++;
+
+    const p = document.createElement('div');
+    p.className = 'particle';
+    // random branch (top bus)
+    const startX = (90 + Math.random()*200) * sx;
+    const startY = 60 * sy;
+    p.style.left = startX + 'px';
+    p.style.top  = startY + 'px';
+    container.appendChild(p);
+
+    let x = startX;
+    const dx = speed * 1.4;
+    const maxX = svgW;
+    const raf = setInterval(() => {
+      x += dx;
+      p.style.left = x + 'px';
+      if (x > maxX) {
+        clearInterval(raf);
+        p.remove();
+      }
+    }, 16);
+  }, 120);
+}
+
+function triggerFault(type) {
+  faultMode = true;
+  const container = document.getElementById('circuitContainer');
+  container.classList.add('fault');
+
+  // Flash red on all meters
+  document.querySelectorAll('.meter-val').forEach(el => {
+    el.style.color = '#ff4444';
+  });
+
+  const msg = type === 'short'
+    ? '⚡ SHORT CIRCUIT DETECTED — FUSE BLOWN! Disconnect source immediately.'
+    : '⚠ AMMETER INCORRECTLY WIRED IN PARALLEL — Overload! Use series connection.';
+
+  document.getElementById('kclResult').textContent = msg;
+  document.getElementById('kvlResult').textContent = 'CIRCUIT FAULT — Reset to continue.';
+  document.getElementById('kclBadge').textContent = 'FAULT';
+  document.getElementById('kvlBadge').textContent = 'FAULT';
+  document.getElementById('kclBadge').className = 'verify-badge';
+  document.getElementById('kvlBadge').className = 'verify-badge';
+  document.getElementById('kclBox').className = 'verify-box';
+  document.getElementById('kvlBox').className = 'verify-box';
+
+  // Show fault values
+  document.getElementById('i1Val').textContent = '∞';
+  document.getElementById('i2Val').textContent = '∞';
+  document.getElementById('i3Val').textContent = '∞';
+  document.getElementById('itVal').textContent = '∞';
+
+  setTimeout(() => {
+    container.classList.remove('fault');
+    faultMode = false;
+    document.querySelectorAll('.meter-val').forEach(el => {
+      el.style.color = '';
+    });
+    updateCircuit();
+  }, 3000);
+}
+
+// Init
+updateCircuit();
+</script>
+</body>
+</html>
+HTMLEOF
+echo "Done"
+Output
+
+Done
